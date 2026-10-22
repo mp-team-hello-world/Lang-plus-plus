@@ -30,6 +30,10 @@ TRY: 'try';
 CATCH: 'catch';
 FINALLY: 'finally';
 DO: 'do';
+WHEN: 'when';
+UNTIL: 'until';
+DOWNTO: 'downTo';
+STEP: 'step';
 
 LPAREN: '(';
 RPAREN: ')';
@@ -52,10 +56,17 @@ ADD_ASSIGNMENT: '+=';
 SUB_ASSIGNMENT: '-=';
 MULT_ASSIGNMENT: '*=';
 DIV_ASSIGNMENT: '/=';
+MOD_ASSIGNMENT: '%=';
 HASH: '#';
 DOT: '.';
 COMMA: ',';
 DOTDOT: '..';
+ARROW: '->';
+LBRACKET: '[';
+RBRACKET: ']';
+EXCL_EXCL: '!!';
+QUEST_DOT: '?.';
+QUEST: '?';
 
 LANGLE: '<';
 RANGLE: '>';
@@ -65,8 +76,30 @@ EXCL_EQ: '!=';
 EQEQ: '==';
 
 STRING_LITERAL
+    : '"' StringPart* '"'
+    ;
+fragment StringPart
+    : ~["\\$]
+    | '\\' .
+    | '$'
+    | TemplateExpr
+    ;
+// ${ ... } может содержать вложенные строки и фигурные скобки: "${xs.joinToString(", ")}"
+fragment TemplateExpr
+    : '$' '{' TemplateInner* '}'
+    ;
+fragment TemplateInner
+    : NestedString
+    | '{' TemplateInner* '}'
+    | ~[{}"]
+    ;
+fragment NestedString
     : '"' ( ~["\\] | '\\' . )* '"'
     ;
+CHAR_LITERAL
+    : '\'' ( ~['\\\r\n] | '\\' . ) '\''
+    ;
 ID: [a-zA-Z_][a-zA-Z0-9_]*;
+LONG: [0-9]+ 'L';
 INT: [0-9]+;
-DOUBLE: [0-9]+ '.' [0-9]+;
+DOUBLE: [0-9]+ '.' [0-9]+ [fF]?;

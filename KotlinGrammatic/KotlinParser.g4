@@ -26,29 +26,69 @@ statement:
 	| doWhileStatement
 	| tryExpression
 	| jumpExpression
+	| whenExpression
 	| expression (SEMICOLON | NL)*
 	| functionDeclaration
 	| unparsedStatement;
 
+// Порядок альтернатив = приоритет (выше в списке -> теснее связывает).
 expression:
-	LPAREN expression RPAREN												# Parens
-	| expression LPAREN (expression (COMMA expression)*)? RPAREN			# FunctionCall
-	| SUB expression														# UnaryMinus
-	| EXCL_NO_WS expression   												# UnaryNot
-	| expression (MULT | DIV | MOD) expression								# MulDiv
-	| expression (ADD | SUB) expression										# AddSub
-	| expression (LANGLE | RANGLE | LE | GE | EQEQ | EXCL_EQ) expression	# Comparison
-	| expression AND expression												# AndOp
-	| expression OR expression												# OrOp
-	| expression CONJ expression											# AndLogical
-	| expression DISJ expression											# OrLogical
-	| ID																	# Identifier
-	| INT																	# IntLiteral
-	| DOUBLE																# DoubleLiteral
-	| STRING_LITERAL   														# StringLiteral
-	| anyUnknownBlock														# UnknownBlock;
+	LPAREN NL* expression NL* RPAREN														# Parens
+	| expression NL* (DOT | QUEST_DOT) NL* ID												# MemberAccess
+	| expression LPAREN NL* (expression (NL* COMMA NL* expression)* NL*)? RPAREN			# FunctionCall
+	| expression lambdaLiteral																# TrailingLambda
+	| expression LBRACKET NL* expression NL* RBRACKET										# Index
+	| expression EXCL_EXCL																	# NotNullAssert
+	| SUB expression																		# UnaryMinus
+	| EXCL_NO_WS expression																	# UnaryNot
+	| expression (MULT | DIV | MOD) NL* expression											# MulDiv
+	| expression (ADD | SUB) NL* expression													# AddSub
+	| expression (DOTDOT | UNTIL | DOWNTO) expression										# RangeExp
+	| expression STEP expression															# StepExp
+	| expression IN expression																# InExp
+	| expression EXCL_NO_WS IN expression													# NotInExp
+	| expression (LANGLE | RANGLE | LE | GE | EQEQ | EXCL_EQ) NL* expression				# Comparison
+	| expression AND NL* expression															# AndOp
+	| expression OR NL* expression															# OrOp
+	| expression CONJ NL* expression														# AndLogical
+	| expression DISJ NL* expression														# OrLogical
+	| ID typeArguments LPAREN NL* (expression (NL* COMMA NL* expression)* NL*)? RPAREN		# GenericCall
+	| IF NL* LPAREN NL* expression NL* RPAREN NL* expression NL* ELSE NL* expression		# IfExp
+	| whenExpression																		# WhenAsExpr
+	| lambdaLiteral																			# LambdaExp
+	| ID																					# Identifier
+	| INT																					# IntLiteral
+	| LONG																					# LongLiteral
+	| DOUBLE																				# DoubleLiteral
+	| STRING_LITERAL																		# StringLiteral
+	| CHAR_LITERAL																			# CharLiteral;
 
+// ---------- типы ----------
+kotlinType: ID typeArguments? QUEST?;
 
+typeArguments: LANGLE NL* kotlinType (NL* COMMA NL* kotlinType)* NL* RANGLE;
+
+// ---------- лямбды ----------
+// { x, y -> ... }   |   { it * 2 }
+lambdaLiteral: LCURL NL* (lambdaParams ARROW NL*)? statements RCURL;
+
+lambdaParams: lambdaParam (COMMA lambdaParam)*;
+
+lambdaParam: ID (COLON kotlinType)?;
+
+// ---------- when ----------
+whenExpression:
+	WHEN NL* (LPAREN NL* expression NL* RPAREN)? NL* LCURL NL* (whenEntry NL*)* RCURL;
+
+whenEntry:
+	whenCondition (NL* COMMA NL* whenCondition)* NL* ARROW NL* controlStructureBody
+	| ELSE NL* ARROW NL* controlStructureBody;
+
+whenCondition:
+	IN expression		# WhenInCondition
+	| expression		# WhenValueCondition;
+
+// ---------- прочее (как было) ----------
 fallbackToken:
     ~(SEMICOLON | NL | LCURL | RCURL | VAL | VAR | FUN);
 
@@ -72,13 +112,15 @@ ifExpression:
 		NL* ELSE NL* controlStructureBody
 	)?;
 
+// for (i in 0..n) / until / downTo / step / for (x in xs) / for (i in xs.indices)
 forStatement:
-	FOR NL* LPAREN NL* ID IN expression DOTDOT expression NL* RPAREN NL* controlStructureBody;
+	FOR NL* LPAREN NL* ID IN expression NL* RPAREN NL* controlStructureBody;
 
-variableDeclaration: (VAL | VAR) ID ASSIGNMENT expression;
+// val x = 1 | var x: Int = 1 | val xs: List<Int> = listOf(1, 2) | var x: Int
+variableDeclaration: (VAL | VAR) ID (COLON kotlinType)? (ASSIGNMENT NL* expression)?;
 
 whileStatement:
-	WHILE NL* LPAREN NL* expression RPAREN NL* (
+	WHILE NL* LPAREN NL* expression NL* RPAREN NL* (
 		controlStructureBody
 		| SEMICOLON
 	);
@@ -88,7 +130,7 @@ doWhileStatement:
 
 jumpExpression:
 	THROW NL* expression
-	| RETURN NL* expression?
+	| RETURN expression?
 	| CONTINUE
 	| BREAK;
 
@@ -105,14 +147,25 @@ finallyBlock: FINALLY NL* block;
 functionDeclaration:
 	FUN NL* ID NL* LPAREN NL* (
 		parameter (NL* COMMA NL* parameter)*
-	)? NL* RPAREN (NL* COLON NL* ID)? NL* functionBody;
+	)? NL* RPAREN (NL* COLON NL* kotlinType)? NL* functionBody;
 
-parameter: ID NL* COLON NL* ID;
+parameter: ID NL* COLON NL* kotlinType (NL* ASSIGNMENT NL* expression)?;
 
 functionBody: block | ASSIGNMENT NL* expression;
 
-assignment: ID ASSIGNMENT expression											# NormalAssignment
-	| ID ADD_ASSIGNMENT expression												# AddAssignment
-	| ID SUB_ASSIGNMENT expression												# SubAssignment
-	| ID MULT_ASSIGNMENT expression												# MultAssignment
-	| ID DIV_ASSIGNMENT expression												# DivAssignment;
+assignment: ID ASSIGNMENT NL* expression										# NormalAssignment
+	| ID ADD_ASSIGNMENT NL* expression											# AddAssignment
+	| ID SUB_ASSIGNMENT NL* expression											# SubAssignment
+	| ID MULT_ASSIGNMENT NL* expression											# MultAssignment
+	| ID DIV_ASSIGNMENT NL* expression											# DivAssignment
+	| ID MOD_ASSIGNMENT NL* expression											# ModAssignment
+	| ID INCR																	# PostIncrement
+	| ID DECR																	# PostDecrement
+	| ID LBRACKET expression RBRACKET (
+		ASSIGNMENT
+		| ADD_ASSIGNMENT
+		| SUB_ASSIGNMENT
+		| MULT_ASSIGNMENT
+		| DIV_ASSIGNMENT
+		| MOD_ASSIGNMENT
+	) NL* expression															# IndexAssignment;
