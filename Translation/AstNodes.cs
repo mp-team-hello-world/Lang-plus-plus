@@ -21,19 +21,25 @@ namespace Kotlin_plus_plus;
 //    * Точка входа программы — функция с именем main. Frontend обязан привести к этому имени
 //      точку входа своего языка (например, C#: Main -> main).
 //    * Поля, помеченные "может быть null", допускают null.
+//    * Присваивание не в простую переменную (xs[i] = v, xs[i] += v) хранится как
+//      ExprStmt(BinaryExpr("=" / "+=" / ..., IndexExpr, value)).
 // =====================================================================================
 
-public enum DataType { Int, Long, Float, Double, Bool, Char, String, Void, Unknown }
+public enum DataType { Int, Long, Float, Double, Bool, Char, String, Void, Unknown, List }
 
 public enum LiteralKind { Int, Double, String, Bool, Char }
 
-/// <summary>Тип в IR. SourceName — как тип назывался в исходнике (нужен для Unknown).</summary>
-public sealed record TypeRef(DataType Kind, string SourceName)
+/// <summary>
+/// Тип в IR. SourceName — как тип назывался в исходнике (нужен для Unknown и чтобы отличать
+/// List от MutableList). Args — аргументы дженерика (для List — тип элемента), может быть null.
+/// </summary>
+public sealed record TypeRef(DataType Kind, string SourceName, IReadOnlyList<TypeRef> Args = null)
 {
     public static readonly TypeRef Void = new(DataType.Void, "Unit");
 }
 
-public sealed record Parameter(string Name, TypeRef Type);
+/// <summary>Параметр функции/лямбды. Default — значение по умолчанию (может быть null).</summary>
+public sealed record Parameter(string Name, TypeRef Type, Expr Default = null);
 
 /// <summary>catch-блок. ExceptionType == null — перехват "всего" (catch без типа).</summary>
 public sealed record CatchClause(string ParamName, string ExceptionType, BlockStmt Body);
@@ -55,6 +61,12 @@ public interface IExprVisitor<T>
     T VisitUnary(UnaryExpr node);
     T VisitBinary(BinaryExpr node);
     T VisitRaw(RawExpr node);
+    T VisitCall(CallExpr node);
+    T VisitMember(MemberExpr node);
+    T VisitIndex(IndexExpr node);
+    T VisitTernary(TernaryExpr node);
+    T VisitTemplate(TemplateExpr node);
+    T VisitLambda(LambdaExpr node);
 }
 
 public interface IStmtVisitor
@@ -120,6 +132,50 @@ public sealed record BinaryExpr(string Op, Expr Left, Expr Right) : Expr
 public sealed record RawExpr(string SourceText) : Expr
 {
     public override T Accept<T>(IExprVisitor<T> v) => v.VisitRaw(this);
+}
+
+/// <summary>
+/// Вызов функции или метода. Receiver == null — свободная функция (println(x)),
+/// иначе метод (xs.add(1)). TypeArgs — явные типы (mutableListOf&lt;Int&gt;()), может быть null.
+/// Аргумент может быть LambdaExpr (в т.ч. trailing-лямбда: xs.map { it * 2 }).
+/// Backend сам решает, во что превратить известные имена (println, listOf, add, size...).
+/// </summary>
+public sealed record CallExpr(Expr Receiver, string Name, IReadOnlyList<Expr> Args, IReadOnlyList<TypeRef> TypeArgs = null) : Expr
+{
+    public override T Accept<T>(IExprVisitor<T> v) => v.VisitCall(this);
+}
+
+/// <summary>Обращение к свойству: xs.size, s.length, e.message.</summary>
+public sealed record MemberExpr(Expr Target, string Name) : Expr
+{
+    public override T Accept<T>(IExprVisitor<T> v) => v.VisitMember(this);
+}
+
+/// <summary>xs[i]</summary>
+public sealed record IndexExpr(Expr Target, Expr Index) : Expr
+{
+    public override T Accept<T>(IExprVisitor<T> v) => v.VisitIndex(this);
+}
+
+/// <summary>if / when как выражение: cond ? then : else.</summary>
+public sealed record TernaryExpr(Expr Condition, Expr Then, Expr Else) : Expr
+{
+    public override T Accept<T>(IExprVisitor<T> v) => v.VisitTernary(this);
+}
+
+/// <summary>
+/// Строковый шаблон "a $x b ${y + 1}". Parts: LiteralExpr(String, текст в кавычках) для кусков
+/// текста и произвольные Expr для подстановок.
+/// </summary>
+public sealed record TemplateExpr(IReadOnlyList<Expr> Parts) : Expr
+{
+    public override T Accept<T>(IExprVisitor<T> v) => v.VisitTemplate(this);
+}
+
+/// <summary>Лямбда { a, b -> ... }. Params пуст, если параметры не заданы (неявный it).</summary>
+public sealed record LambdaExpr(IReadOnlyList<Parameter> Params, BlockStmt Body) : Expr
+{
+    public override T Accept<T>(IExprVisitor<T> v) => v.VisitLambda(this);
 }
 
 // ------------------------------------------ Инструкции ------------------------------------------
