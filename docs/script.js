@@ -142,7 +142,7 @@ async function translateText() {
     setTimeout(() => { translateBtn.style.transform = ''; }, 120);
 
     try {
-        const tunnelUrl = 'https://preliminary-talks-lucky-environments.trycloudflare.com/translate';
+        const tunnelUrl = 'https://lang-plus-plus-jikop.loca.lt/translate';
 
         const response = await fetch(tunnelUrl, {
             method: 'POST',
