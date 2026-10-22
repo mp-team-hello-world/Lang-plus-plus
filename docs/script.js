@@ -142,7 +142,7 @@ async function translateText() {
     setTimeout(() => { translateBtn.style.transform = ''; }, 120);
 
     try {
-        const tunnelUrl = 'https://lang-plus-plus-jikop.loca.lt/translate';
+        const tunnelUrl = 'https://lang-plus-plus-mkn-26.loca.lt/translate';
 
         const response = await fetch(tunnelUrl, {
             method: 'POST',
