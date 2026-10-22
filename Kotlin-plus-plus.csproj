@@ -6,31 +6,29 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Antlr4BuildTasks" Version="2.0.0" PrivateAssets="all" />
     <PackageReference Include="Antlr4.Runtime.Standard" Version="4.13.1" />
-  </ItemGroup>
-  
-  <ItemGroup>
     <PackageReference Include="NUnit" Version="4.*" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.*" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
   </ItemGroup>
-  
-  <PropertyGroup>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
-  </PropertyGroup>
 
   <ItemGroup>
-    <Antlr4 Update="KotlinGrammatic\*.g4">
-      <Package>Kotlin_plus_plus</Package>
+    <Antlr4 Include="KotlinGrammatic/*.g4">
       <Listener>true</Listener>
-      <Visitor>false</Visitor>
-      <TargetLanguage>CSharp</TargetLanguage>
-      <OutputDir>$(ProjectDir)Generated</OutputDir>
+      <Visitor>true</Visitor>
+    </Antlr4>
+    <Antlr4 Include="PythonGrammatic/*.g4">
+      <Listener>true</Listener>
+      <Visitor>true</Visitor>
+    </Antlr4>
+    <Antlr4 Include="CSharpGrammatic/*.g4">
+      <Listener>true</Listener>
+      <Visitor>true</Visitor>
     </Antlr4>
   </ItemGroup>
 

@@ -142,8 +142,7 @@ async function translateText() {
     setTimeout(() => { translateBtn.style.transform = ''; }, 120);
 
     try {
-        const tunnelUrl = 'https://mkn-kotlin-compiler.loca.lt/translate';
-        // const tunnelUrl = 'http://localhost:5000/translate' //- для локального тестирования
+        const tunnelUrl = 'https://lang-plus-plus-mkn-26.loca.lt/translate';
 
         const response = await fetch(tunnelUrl, {
             method: 'POST',

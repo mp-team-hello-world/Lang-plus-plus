@@ -23,10 +23,9 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Настраиваем порт, который будет слушать приложение локально
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.ListenLocalhost(5000);
+    options.ListenAnyIP(5000);
 });
 
 var app = builder.Build();
