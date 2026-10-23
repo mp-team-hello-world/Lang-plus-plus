@@ -1,0 +1,33 @@
+:root,
+html[data-theme="kotlin"] {
+    --accent:        #3b82f6;
+    --accent-hover:  #2563eb;
+    --accent-soft:   #eff6ff;
+    --accent-soft-2: #dbeafe;
+    --accent-ring:   rgba(59, 130, 246, 0.10);
+    --accent-shadow: rgba(59, 130, 246, 0.40);
+    --accent-dot:    #3b82f6;
+    --accent-text:   #1e3a8a;
+}
+
+html[data-theme="sharp"] {
+    --accent:        #f97316;
+    --accent-hover:  #ea580c;
+    --accent-soft:   #fff7ed;
+    --accent-soft-2: #ffedd5;
+    --accent-ring:   rgba(249, 115, 22, 0.12);
+    --accent-shadow: rgba(249, 115, 22, 0.40);
+    --accent-dot:    #f97316;
+    --accent-text:   #7c2d12;
+}
+
+html[data-theme="python"] {
+    --accent:        #10b981;
+    --accent-hover:  #059669;
+    --accent-soft:   #ecfdf5;
+    --accent-soft-2: #d1fae5;
+    --accent-ring:   rgba(16, 185, 129, 0.12);
+    --accent-shadow: rgba(16, 185, 129, 0.40);
+    --accent-dot:    #10b981;
+    --accent-text:   #065f46;
+}

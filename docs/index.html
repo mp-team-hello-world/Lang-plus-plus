@@ -5,14 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lang++ | Internet code transpiler</title>
     <link rel="icon" type="image/png" href="favicon.png">
-    <link rel="stylesheet" href="style.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700;14..32,800;14..32,900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css">
+    <link rel="stylesheet" href="css/theme.css">
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/highlight-overlay.css">
+    <link rel="stylesheet" href="css/toast.css">
+    <link rel="stylesheet" href="css/modal.css">
+    <link rel="stylesheet" href="css/welcome.css">
+    <link rel="stylesheet" href="css/tree.css">
+    <link rel="stylesheet" href="css/responsive.css">
 </head>
 <body>
 
-    <!-- ============================
-         СТАРТОВЫЙ ЭКРАН
-         ============================ -->
     <div class="welcome-screen" id="welcomeScreen">
         <div class="welcome-card">
             <div class="welcome-logo">💻</div>
@@ -49,10 +54,6 @@
         </div>
     </div>
 
-    <!-- ============================
-         МОДАЛКА ВЫБОРА ЯЗЫКА
-         (просто блюр поверх welcome)
-         ============================ -->
     <div id="languageModal" class="modal modal-welcome-style">
         <div class="modal-welcome-card">
             <div class="welcome-logo">🌐</div>
@@ -66,9 +67,6 @@
         </div>
     </div>
 
-    <!-- ============================
-         ОСНОВНОЙ ИНТЕРФЕЙС
-         ============================ -->
     <div class="container" id="mainApp" hidden>
         <h1 class="header-title" id="appTitle">Kotlin++</h1>
 
@@ -85,8 +83,9 @@
                     <span class="panel-header-label">📄 <span id="leftLangName">Choose language</span> Code</span>
                     <span class="panel-header-arrow">▾</span>
                 </button>
-                <div class="textarea-wrapper">
-                    <textarea class="text-box" id="leftText" placeholder="Type or paste your source code here...&#10;Then press Translate"></textarea>
+                <div class="textarea-wrapper code-editor-wrapper">
+                    <pre class="highlight-layer" id="leftHighlight" aria-hidden="true"><code class="language-plaintext"></code></pre>
+                    <textarea class="text-box code-input" id="leftText" spellcheck="false" placeholder="Type or paste your source code here...&#10;Then press Translate"></textarea>
                 </div>
             </div>
 
@@ -94,14 +93,14 @@
                 <div class="panel-header panel-header-static">
                     <span class="panel-header-label">📄 C++ Code</span>
                 </div>
-                <div class="textarea-wrapper">
-                    <textarea class="text-box" id="rightText" placeholder="Translated result appears here...&#10;You can also edit this field manually.&#10;Click Download to save this as .cpp file."></textarea>
+                <div class="textarea-wrapper code-editor-wrapper">
+                    <pre class="highlight-layer" id="rightHighlight" aria-hidden="true"><code class="language-cpp"></code></pre>
+                    <textarea class="text-box code-input" id="rightText" spellcheck="false" placeholder="Translated result appears here...&#10;You can also edit this field manually.&#10;Click Download to save this as .cpp file."></textarea>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Уведомления -->
     <div id="progressToast" class="toast-notification toast-error">
         <span class="toast-icon">⚠️</span>
         <span class="toast-message">sorry, this part is in progress yet</span>
@@ -117,7 +116,6 @@
         <span class="toast-message">Couldn't detect language — please pick one</span>
     </div>
 
-    <!-- Модалка имени файла -->
     <div id="filenameModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -136,7 +134,6 @@
         </div>
     </div>
 
-    <!-- Parse Tree -->
     <div id="treeScreen" class="tree-screen">
         <div class="tree-screen-header">
             <div class="tree-screen-title">🌳 Parse Tree</div>
@@ -163,8 +160,25 @@
         </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/kotlin.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/csharp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/languages/cpp.min.js"></script>
+
     <script src="https://d3js.org/d3.v7.min.js"></script>
-    <script src="tree-view.js"></script>
-    <script src="script.js"></script>
+    <script src="js/state.js"></script>
+    <script src="js/theme.js"></script>
+    <script src="js/welcome.js"></script>
+    <script src="js/toast.js"></script>
+    <script src="js/highlight-overlay.js"></script>
+    <script src="js/textarea.js"></script>
+    <script src="js/language.js"></script>
+    <script src="js/file-loader.js"></script>
+    <script src="js/translate.js"></script>
+    <script src="js/download.js"></script>
+    <script src="js/tree-view.js"></script>
+    <script src="js/bindings.js"></script>
+    <script src="js/init.js"></script>
 </body>
 </html>
