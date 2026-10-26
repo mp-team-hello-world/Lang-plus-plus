@@ -10,11 +10,6 @@ namespace Kotlin_plus_plus;
 public sealed class CppBackend : ITargetBackend
 {
     public string Generate(ProgramNode program) => new Generator().Generate(program);
-
-    // ======================================================================================
-    //  Вспомогательные шаблоны C++. Попадают в вывод только если реально использованы.
-    //  Needs — от каких хелперов зависит (они выводятся раньше).
-    // ======================================================================================
     private static readonly Dictionary<string, (string Code, string[] Needs)> Helpers = new()
     {
         ["kt_io"] = (@"static const bool kt_io_init = (cout << boolalpha, true);", Array.Empty<string>()),
@@ -156,8 +151,6 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
             _usedHelpers.Add(helper);
         }
 
-        // Заголовок -> признак его использования в сгенерированном коде.
-        // Порядок списка = порядок #include в выводе.
         private static readonly (string Header, Regex Usage)[] HeaderRules =
         {
             ("iostream",   new Regex(@"\b(cout|cin|cerr|endl|boolalpha)\b")),
@@ -177,13 +170,11 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
         private static readonly Regex StringLiteral = new(@"""(\\.|[^""\\])*""|'(\\.|[^'\\])*'", RegexOptions.Compiled);
         private static readonly Regex Comments = new(@"/\*.*?\*/|//[^\n]*", RegexOptions.Compiled | RegexOptions.Singleline);
 
-        // Хелперы в таблице записаны компактно (по строке на функцию). Здесь раскладываем их
-        // в тот же стиль, что и остальной вывод: скобки на отдельных строках, по оператору на строку.
         private static string Pretty(string code)
         {
             var lines = new List<string>();
             var cur = new StringBuilder();
-            var blocks = new Stack<bool>();   // true — фигурная скобка блока, false — инициализатор {...}
+            var blocks = new Stack<bool>();
             int indent = 0, paren = 0;
 
             void Flush()
@@ -259,8 +250,6 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
             }
             body.AddRange(_w.Lines);
 
-            // Заголовки определяем по тексту результата (без строковых литералов и комментариев):
-            // так не нужно вести отдельные флаги "что использовано".
             string code = string.Join("\n", body);
             string scanned = Comments.Replace(StringLiteral.Replace(code, "\"\""), "");
 
@@ -282,7 +271,6 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
 
         private string Render(Expr expr) => expr == null ? string.Empty : expr.Accept(this);
 
-        // ---------- программа: main и прототипы ----------
 
         private void EmitProgram(ProgramNode program)
         {
@@ -452,7 +440,10 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
                     Emit(statements[i]);
             }
 
-            string body = string.Join(" ", _w.Lines.Select(l => l.Trim()));
+            // Лямбда склеивается в одну строку, а // закомментировал бы всё до её конца,
+            // поэтому комментарии внутри лямбды остаются в виде /* ... */
+            string body = string.Join(" ", _w.Lines.Select(l => l.Trim()).Select(l =>
+                l.StartsWith("//") ? "/* " + l.Substring(2).Trim() + " */" : l));
             _w = saved;
 
             string parameters = lambda.Params.Count > 0
@@ -942,14 +933,14 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
 
             if (node.Finally != null)
             {
-                _w.Line("/* finally */");
+                _w.Line("// finally");
                 Emit(node.Finally);
             }
         }
 
         public void VisitUnsupported(UnsupportedStmt node)
         {
-            _w.Line($"/* {node.Description}: {node.SourceText} */");
+            _w.Line($"// {node.Description}: {node.SourceText}");
         }
     }
 }
