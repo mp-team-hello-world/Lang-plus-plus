@@ -26,12 +26,17 @@ THROW: 'throw';
 TRY: 'try';
 CATCH: 'catch';
 FINALLY: 'finally';
+USING: 'using';
+NAMESPACE: 'namespace';
+CLASS: 'class';
+NEW: 'new';
 
 // Modifiers
 PUBLIC: 'public';
 PRIVATE: 'private';
 PROTECTED: 'protected';
 STATIC: 'static';
+INTERNAL: 'internal';
 
 // Primitive types
 VOID: 'void';

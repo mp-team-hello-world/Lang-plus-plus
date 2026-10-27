@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Antlr4.Runtime.Tree;
 
 namespace Kotlin_plus_plus;
@@ -22,10 +23,86 @@ public class CSharpAstBuilder : CSharpParserBaseVisitor<AstNode>
 
         foreach (var statement in statements.statement())
         {
+            // class / namespace — не инструкции IR: их члены (методы, static-поля) становятся инструкциями верхнего уровня
+            var members = FlattenContainer(statement);
+            if (members != null)
+            {
+                result.AddRange(members);
+                continue;
+            }
+
             if (Visit(statement) is Stmt stmt) result.Add(stmt);
         }
         return result;
     }
+
+    private List<Stmt> FlattenContainer(CSharpParser.StatementContext statement)
+    {
+        if (statement.classDeclaration() != null)
+            return BuildStatements(statement.classDeclaration().block().statements());
+
+        if (statement.namespaceDeclaration() != null)
+        {
+            var ns = statement.namespaceDeclaration();
+            // namespace X; (файловая форма) — содержимого нет, дальнейшие инструкции и так на верхнем уровне
+            return ns.block() != null ? BuildStatements(ns.block().statements()) : new List<Stmt>();
+        }
+
+        return null;
+    }
+
+    // ---------- имена стандартной библиотеки C# -> имена, которые знает backend ----------
+
+    private static readonly Dictionary<string, string> StaticCalls = new()
+    {
+        ["Console.WriteLine"] = "println",
+        ["Console.Write"] = "print",
+        ["Console.ReadLine"] = "readLine",
+        ["Math.Sqrt"] = "sqrt",
+        ["Math.Pow"] = "pow",
+        ["Math.Abs"] = "abs",
+        ["Math.Max"] = "maxOf",
+        ["Math.Min"] = "minOf",
+        ["Math.Floor"] = "floor",
+        ["Math.Ceiling"] = "ceil",
+        ["Math.Round"] = "round"
+    };
+
+    // Convert.ToInt32(x) -> x.toInt()
+    private static readonly Dictionary<string, string> ConvertCalls = new()
+    {
+        ["ToInt32"] = "toInt",
+        ["ToInt64"] = "toLong",
+        ["ToDouble"] = "toDouble",
+        ["ToString"] = "toString"
+    };
+
+    private static readonly Dictionary<string, string> MethodNames = new()
+    {
+        ["Add"] = "add",
+        ["AddRange"] = "addAll",
+        ["Remove"] = "remove",
+        ["RemoveAt"] = "removeAt",
+        ["Clear"] = "clear",
+        ["Contains"] = "contains",
+        ["Sort"] = "sort",
+        ["Reverse"] = "reverse",
+        ["IndexOf"] = "indexOf",
+        ["ToUpper"] = "uppercase",
+        ["ToLower"] = "lowercase",
+        ["Substring"] = "substring",
+        ["StartsWith"] = "startsWith",
+        ["EndsWith"] = "endsWith",
+        ["Split"] = "split",
+        ["ToString"] = "toString"
+    };
+
+    private static readonly Dictionary<string, string> PropertyNames = new()
+    {
+        ["Length"] = "length",
+        ["Count"] = "size",
+        ["Message"] = "message"
+    };
 
     private static TypeRef ParseType(string csharpType) => csharpType switch
     {
@@ -275,12 +352,54 @@ public class CSharpAstBuilder : CSharpParserBaseVisitor<AstNode>
             : new UnsupportedStmt("Unsupported statement construction", raw);
     }
 
-    // Вызовы и обращения к членам (Console.WriteLine(...)) пока передаются как исходный текст
-    public override AstNode VisitFunctionCall(CSharpParser.FunctionCallContext context)
-        => new RawExpr(AntlrText.Raw(context));
+    // using / class / namespace сами по себе инструкций IR не дают (class и namespace раскрываются в BuildStatements)
+    public override AstNode VisitUsingDirective(CSharpParser.UsingDirectiveContext context) => null;
 
+    public override AstNode VisitClassDeclaration(CSharpParser.ClassDeclarationContext context) => null;
+
+    public override AstNode VisitNamespaceDeclaration(CSharpParser.NamespaceDeclarationContext context) => null;
+
+    // f(args), obj.Method(args), Console.WriteLine(args)
+    public override AstNode VisitFunctionCall(CSharpParser.FunctionCallContext context)
+    {
+        var all = context.expression();
+        var args = all.Skip(1).Select(ToExpr).ToList();
+
+        if (all[0] is CSharpParser.MemberAccessContext member)
+        {
+            string name = member.ID().GetText();
+
+            if (member.expression() is CSharpParser.IdentifierContext owner)
+            {
+                string ownerName = owner.ID().GetText();
+
+                // Console.WriteLine -> println, Math.Sqrt -> sqrt ...
+                if (StaticCalls.TryGetValue(ownerName + "." + name, out var mapped))
+                    return new CallExpr(null, mapped, args);
+
+                // Convert.ToInt32(x) -> x.toInt()
+                if (ownerName == "Convert" && args.Count == 1 && ConvertCalls.TryGetValue(name, out var conv))
+                    return new CallExpr(args[0], conv, new List<Expr>());
+            }
+
+            return new CallExpr(ToExpr(member.expression()), MethodNames.GetValueOrDefault(name, name), args);
+        }
+
+        if (all[0] is CSharpParser.IdentifierContext id) return new CallExpr(null, id.ID().GetText(), args);
+
+        return new RawExpr(AntlrText.Raw(context));
+    }
+
+    // obj.Length, list.Count, e.Message
     public override AstNode VisitMemberAccess(CSharpParser.MemberAccessContext context)
-        => new RawExpr(AntlrText.Raw(context));
+    {
+        string name = context.ID().GetText();
+        return new MemberExpr(ToExpr(context.expression()), PropertyNames.GetValueOrDefault(name, name));
+    }
+
+    // new Exception("msg") -> вызов Exception("msg"); backend превращает ...Exception(...) в runtime_error
+    public override AstNode VisitNewObject(CSharpParser.NewObjectContext context)
+        => new CallExpr(null, context.ID().GetText(), context.expression().Select(ToExpr).ToList());
 
     // i++ внутри более сложного выражения (a[i++], x = i++) — как исходный текст.
     // На уровне инструкции они превращаются в IncDecStmt (см. TryIncDec).
