@@ -17,6 +17,7 @@ async function translateText() {
 
     try {
         const tunnelUrl = 'https://lang-plus-plus-mkn-26.loca.lt/translate';
+        // const tunnelUrl = 'http://localhost:5000/translate' //- для локального тестирования
 
         const response = await fetch(tunnelUrl, {
             method: 'POST',
