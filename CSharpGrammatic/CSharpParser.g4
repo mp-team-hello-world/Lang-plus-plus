@@ -13,7 +13,10 @@ root: statements EOF;
 statements: statement*;
 
 statement:
-	variableDeclaration
+	usingDirective
+	| namespaceDeclaration
+	| classDeclaration
+	| variableDeclaration
 	| assignment SEMICOLON
 	| ifStatement
 	| forStatement
@@ -28,19 +31,31 @@ statement:
 	| SEMICOLON
 	| unparsedStatement;
 
+// int, string, Foo, а также массивы: string[]
 type:
-	INT_TYPE
-	| LONG_TYPE
-	| FLOAT_TYPE
-	| DOUBLE_TYPE
-	| BOOL_TYPE
-	| CHAR_TYPE
-	| STRING_TYPE
-	| VOID
-	| ID;
+	(
+		INT_TYPE
+		| LONG_TYPE
+		| FLOAT_TYPE
+		| DOUBLE_TYPE
+		| BOOL_TYPE
+		| CHAR_TYPE
+		| STRING_TYPE
+		| VOID
+		| ID
+	) (LBRACK RBRACK)?;
+
+// using System;   (using (...) { } и using static остаются в unparsedStatement)
+usingDirective: USING ID (DOT ID)* SEMICOLON;
+
+// namespace A.B { ... }   или   namespace A.B;
+namespaceDeclaration: NAMESPACE ID (DOT ID)* (block | SEMICOLON);
+
+// class Program { ... } — члены класса "вытаскиваются" на верхний уровень (см. CSharpAstBuilder)
+classDeclaration: modifier* CLASS ID block;
 
 variableDeclaration:
-	(CONST? type | VAR) ID (ASSIGNMENT expression)? SEMICOLON;
+	modifier* (CONST? type | VAR) ID (ASSIGNMENT expression)? SEMICOLON;
 
 assignment:
 	ID ASSIGNMENT expression		# NormalAssignment
@@ -91,7 +106,7 @@ jumpStatement:
 	| BREAK SEMICOLON
 	| CONTINUE SEMICOLON;
 
-modifier: PUBLIC | PRIVATE | PROTECTED | STATIC;
+modifier: PUBLIC | PRIVATE | PROTECTED | INTERNAL | STATIC;
 
 functionDeclaration:
 	modifier* type ID LPAREN parameterList? RPAREN (block | ARROW expression SEMICOLON);
@@ -117,6 +132,7 @@ expression:
 	| expression (LANGLE | RANGLE | LE | GE | EQEQ | EXCL_EQ) expression	# Comparison
 	| expression CONJ expression											# AndLogical
 	| expression DISJ expression											# OrLogical
+	| NEW ID LPAREN (expression (COMMA expression)*)? RPAREN	# NewObject
 	| ID																	# Identifier
 	| INT																	# IntLiteral
 	| DOUBLE																# DoubleLiteral
