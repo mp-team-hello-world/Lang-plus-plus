@@ -1,0 +1,110 @@
+using System;
+
+class Program
+{
+    static int Square(int x)
+    {
+        return x * x;
+    }
+
+    static int Factorial(int n)
+    {
+        if (n <= 1)
+        {
+            return 1;
+        }
+        return n * Factorial(n - 1);
+    }
+
+    static bool IsPrime(int n)
+    {
+        if (n < 2)
+        {
+            return false;
+        }
+        int d = 2;
+        while (d * d <= n)
+        {
+            if (n % d == 0)
+            {
+                return false;
+            }
+            d++;
+        }
+        return true;
+    }
+
+    static void Main()
+    {
+        // переменные и арифметика
+        int a = 17;
+        int b = 25;
+        double ratio = 7 / 2.0;
+        string name = "World";
+        bool big = a > b;
+        var total = a + b * 2;
+        const int Limit = 5;
+
+        Console.WriteLine("Hello, " + name);
+        Console.WriteLine(Square(7));
+        Console.WriteLine(Factorial(5));
+
+        // ветвления
+        if (a > b)
+        {
+            Console.WriteLine("a is bigger");
+        }
+        else if (a == b)
+        {
+            Console.WriteLine("equal");
+        }
+        else
+        {
+            Console.WriteLine("b is bigger");
+        }
+
+        // циклы
+        for (int i = 0; i < Limit; i++)
+        {
+            Console.WriteLine(i);
+        }
+
+        int count = 0;
+        while (count < 3)
+        {
+            count++;
+        }
+
+        do
+        {
+            count--;
+        } while (count > 0);
+
+        for (int n = 2; n <= 30; n++)
+        {
+            if (!IsPrime(n))
+            {
+                continue;
+            }
+            if (n > 20)
+            {
+                break;
+            }
+            Console.WriteLine(n);
+        }
+
+        // составное присваивание
+        total += 10;
+        total *= 2;
+
+        // исключения
+        try
+        {
+            throw new Exception("boom");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("caught");
+        }
+    }
+}
