@@ -10,6 +10,11 @@ namespace Kotlin_plus_plus;
 public sealed class CppBackend : ITargetBackend
 {
     public string Generate(ProgramNode program) => new Generator().Generate(program);
+
+    // ======================================================================================
+    //  Вспомогательные шаблоны C++. Попадают в вывод только если реально использованы.
+    //  Needs — от каких хелперов зависит (они выводятся раньше).
+    // ======================================================================================
     private static readonly Dictionary<string, (string Code, string[] Needs)> Helpers = new()
     {
         ["kt_io"] = (@"static const bool kt_io_init = (cout << boolalpha, true);", Array.Empty<string>()),
@@ -151,6 +156,8 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
             _usedHelpers.Add(helper);
         }
 
+        // Заголовок -> признак его использования в сгенерированном коде.
+        // Порядок списка = порядок #include в выводе.
         private static readonly (string Header, Regex Usage)[] HeaderRules =
         {
             ("iostream",   new Regex(@"\b(cout|cin|cerr|endl|boolalpha)\b")),
@@ -170,11 +177,13 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
         private static readonly Regex StringLiteral = new(@"""(\\.|[^""\\])*""|'(\\.|[^'\\])*'", RegexOptions.Compiled);
         private static readonly Regex Comments = new(@"/\*.*?\*/|//[^\n]*", RegexOptions.Compiled | RegexOptions.Singleline);
 
+        // Хелперы в таблице записаны компактно (по строке на функцию). Здесь раскладываем их
+        // в тот же стиль, что и остальной вывод: скобки на отдельных строках, по оператору на строку.
         private static string Pretty(string code)
         {
             var lines = new List<string>();
             var cur = new StringBuilder();
-            var blocks = new Stack<bool>();
+            var blocks = new Stack<bool>();   // true — фигурная скобка блока, false — инициализатор {...}
             int indent = 0, paren = 0;
 
             void Flush()
@@ -250,6 +259,8 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
             }
             body.AddRange(_w.Lines);
 
+            // Заголовки определяем по тексту результата (без строковых литералов и комментариев):
+            // так не нужно вести отдельные флаги "что использовано".
             string code = string.Join("\n", body);
             string scanned = Comments.Replace(StringLiteral.Replace(code, "\"\""), "");
 
@@ -271,6 +282,7 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
 
         private string Render(Expr expr) => expr == null ? string.Empty : expr.Accept(this);
 
+        // ---------- программа: main и прототипы ----------
 
         private void EmitProgram(ProgramNode program)
         {
@@ -385,7 +397,33 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
 
         public string VisitUnary(UnaryExpr node) => $"{node.Op}{Render(node.Operand)}";
 
-        public string VisitBinary(BinaryExpr node) => $"{Render(node.Left)} {node.Op} {Render(node.Right)}";
+        public string VisitBinary(BinaryExpr node)
+        {
+            if (node.Op == "+" && IsStringy(node)) return RenderConcat(node);
+            return $"{Render(node.Left)} {node.Op} {Render(node.Right)}";
+        }
+
+        // Выражение, значение которого в исходном языке — строка (содержит строковый литерал в цепочке "+")
+        private static bool IsStringy(Expr expr) => expr switch
+        {
+            LiteralExpr { Kind: LiteralKind.String } => true,
+            TemplateExpr => true,
+            ParenExpr p => IsStringy(p.Inner),
+            BinaryExpr { Op: "+" } b => IsStringy(b.Left) || IsStringy(b.Right),
+            _ => false
+        };
+
+        // "a" + x + "b"  ->  string("a") + kt_str(x) + "b"   (в C++ нельзя сложить const char* с числом)
+        private string RenderConcat(BinaryExpr node)
+        {
+            string Side(Expr e, bool isLeft)
+            {
+                if (e is LiteralExpr { Kind: LiteralKind.String } literal)
+                    return isLeft ? $"string({literal.Text})" : literal.Text;
+                return IsStringy(e) ? Render(e) : StrOf(e);
+            }
+            return $"{Side(node.Left, true)} + {Side(node.Right, false)}";
+        }
 
         public string VisitRaw(RawExpr node) => node.SourceText;
 
@@ -410,10 +448,10 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
         public string VisitTemplate(TemplateExpr node)
         {
             var pieces = node.Parts
-                .Select(p => p is LiteralExpr literal ? literal.Text : StrOf(p))
+                .Select(p => p is LiteralExpr { Kind: LiteralKind.String } literal ? literal.Text : StrOf(p))
                 .ToList();
 
-            if (node.Parts[0] is LiteralExpr) pieces[0] = $"string({pieces[0]})";
+            if (node.Parts[0] is LiteralExpr { Kind: LiteralKind.String }) pieces[0] = $"string({pieces[0]})";
             return "(" + string.Join(" + ", pieces) + ")";
         }
 
@@ -750,9 +788,9 @@ template <class T> double kt_toDouble(const T& v) { return static_cast<double>(v
         // Тип не указан (Kotlin, C# var) -> auto
         private static string DeclaredType(VarDeclStmt node)
         {
-            if (node.Type == null) return "auto";
+            if (node.Type == null) return node.Init != null && IsStringy(node.Init) ? "string" : "auto";
             if (node.Type.Kind != DataType.Unknown) return ToCppType(node.Type);
-            return node.Init == null ? node.Type.SourceName : "auto";
+            return node.Init == null ? node.Type.SourceName : (IsStringy(node.Init) ? "string" : "auto");
         }
 
         private string AssignText(AssignStmt node) => $"{node.Target} {node.Op} {Render(node.Value)}";

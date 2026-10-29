@@ -1,13 +1,43 @@
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using Antlr4.Runtime.Tree;
 
 namespace Kotlin_plus_plus;
 
 /// <summary>
 /// Построитель IR-дерева для Python на основе сгенерированных классов PythonParser.
+/// Грамматика не менялась: исправлены только ошибки перевода.
 /// </summary>
 public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
 {
+    private static readonly LiteralExpr Zero = new(LiteralKind.Int, "0");
+    private static readonly LiteralExpr One = new(LiteralKind.Int, "1");
+
+    // ---------- области видимости ----------
+    // В Python переменная появляется при первом присваивании, в C++ её надо объявить.
+    // Область — блок; у каждой функции своя "рамка", внешние локальные имена ей не принадлежат.
+
+    private readonly List<HashSet<string>> _scopes = new() { new HashSet<string>() };
+    private int _frameStart;
+
+    private bool IsDeclared(string name)
+    {
+        for (int i = _scopes.Count - 1; i >= _frameStart; i--)
+        {
+            if (_scopes[i].Contains(name)) return true;
+        }
+        return false;
+    }
+
+    private void Declare(string name) => _scopes[_scopes.Count - 1].Add(name);
+
+    private void PushScope() => _scopes.Add(new HashSet<string>());
+
+    private void PopScope() => _scopes.RemoveAt(_scopes.Count - 1);
+
+    // ---------- вспомогательные ----------
+
     private Expr ToExpr(IParseTree tree) => tree == null ? null : Visit(tree) as Expr;
 
     private Stmt ToStmt(IParseTree tree) => tree == null ? null : Visit(tree) as Stmt;
@@ -19,10 +49,27 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
 
         foreach (var stmtCtx in context.statement())
         {
-            if (Visit(stmtCtx) is Stmt stmt)
+            if (stmtCtx.compoundStatement() != null)
             {
-                result.Add(stmt);
+                if (Visit(stmtCtx.compoundStatement()) is Stmt compound) result.Add(compound);
             }
+            else if (stmtCtx.simpleStatement() != null)
+            {
+                result.AddRange(SmallStatements(stmtCtx.simpleStatement()));
+            }
+        }
+        return result;
+    }
+
+    // a = 1; b = 2  — каждая часть становится отдельной инструкцией (раньше оставалась только первая)
+    private List<Stmt> SmallStatements(PythonParser.SimpleStatementContext context)
+    {
+        var result = new List<Stmt>();
+        foreach (var small in context.smallStatement())
+        {
+            var node = Visit(small);
+            if (node is Stmt stmt) result.Add(stmt);
+            else if (node is Expr expr) result.Add(new ExprStmt(expr));
         }
         return result;
     }
@@ -31,24 +78,62 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
     {
         "int" => new TypeRef(DataType.Int, typeName),
         "bool" => new TypeRef(DataType.Bool, typeName),
-        "float" => new TypeRef(DataType.Float, typeName),
+        "float" => new TypeRef(DataType.Double, typeName),   // float в Python — это double
         "str" => new TypeRef(DataType.String, typeName),
         _ => new TypeRef(DataType.Unknown, typeName)
     };
 
-    // --- Корень программы ---
+    // ---------- корень программы ----------
+
     public override AstNode VisitRoot(PythonParser.RootContext context)
     {
-        return new ProgramNode(BuildStatements(context.statements()));
+        var result = new List<Stmt>();
+
+        foreach (var stmt in BuildStatements(context.statements()))
+        {
+            // if __name__ == "__main__": ...  — тело становится кодом верхнего уровня
+            if (IsMainGuard(stmt, out var body)) result.AddRange(body);
+            else result.Add(stmt);
+        }
+
+        // def main(): ... и вызов main() на верхнем уровне: сам вызов не нужен, main и есть точка входа
+        bool hasMain = result.OfType<FunctionDecl>().Any(f => f.Name == "main");
+        if (hasMain)
+        {
+            result.RemoveAll(s => s is ExprStmt { Expression: CallExpr { Receiver: null, Name: "main" } call }
+                                  && call.Args.Count == 0);
+        }
+
+        return new ProgramNode(result);
     }
 
-    // --- Инструкции ---
+    private static bool IsMainGuard(Stmt stmt, out List<Stmt> body)
+    {
+        body = null;
+        if (stmt is IfStmt
+            {
+                Else: null,
+                Condition: BinaryExpr
+                {
+                    Op: "==",
+                    Left: IdentifierExpr { Name: "__name__" },
+                    Right: LiteralExpr { Kind: LiteralKind.String } literal
+                }
+            } guard
+            && literal.Text.Contains("__main__"))
+        {
+            body = guard.Then is BlockStmt block ? block.Statements.ToList() : new List<Stmt> { guard.Then };
+            return true;
+        }
+        return false;
+    }
+
+    // ---------- инструкции ----------
+
     public override AstNode VisitStatement(PythonParser.StatementContext context)
     {
-        if (context.compoundStatement() != null)
-            return Visit(context.compoundStatement());
-        if (context.simpleStatement() != null)
-            return Visit(context.simpleStatement());
+        if (context.compoundStatement() != null) return Visit(context.compoundStatement());
+        if (context.simpleStatement() != null) return SmallStatements(context.simpleStatement()).FirstOrDefault();
         return null;
     }
 
@@ -59,17 +144,6 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
         if (context.forStatement() != null) return Visit(context.forStatement());
         if (context.whileStatement() != null) return Visit(context.whileStatement());
         if (context.tryStatement() != null) return Visit(context.tryStatement());
-        return null;
-    }
-
-    public override AstNode VisitSimpleStatement(PythonParser.SimpleStatementContext context)
-    {
-        foreach (var small in context.smallStatement())
-        {
-            var node = Visit(small);
-            if (node is Stmt stmt) return stmt;
-            if (node is Expr expr) return new ExprStmt(expr);
-        }
         return null;
     }
 
@@ -89,30 +163,45 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
         return null;
     }
 
-    // --- Присваивания и объявления ---
+    // ---------- присваивания и объявления ----------
+
+    // Первое присваивание имени — это объявление (auto x = ...), дальше — обычное присваивание
+    private AstNode Assign(string name, string op, Expr value)
+    {
+        if (op == "=" && !IsDeclared(name))
+        {
+            Declare(name);
+            return new VarDeclStmt(false, name, value);
+        }
+        return new AssignStmt(name, op, value);
+    }
+
     public override AstNode VisitNormalAssignment(PythonParser.NormalAssignmentContext context)
-        => new AssignStmt(context.ID().GetText(), "=", ToExpr(context.expression()));
+        => Assign(context.ID().GetText(), "=", ToExpr(context.expression()));
 
     public override AstNode VisitAddAssignment(PythonParser.AddAssignmentContext context)
-        => new AssignStmt(context.ID().GetText(), "+=", ToExpr(context.expression()));
+        => Assign(context.ID().GetText(), "+=", ToExpr(context.expression()));
 
     public override AstNode VisitSubAssignment(PythonParser.SubAssignmentContext context)
-        => new AssignStmt(context.ID().GetText(), "-=", ToExpr(context.expression()));
+        => Assign(context.ID().GetText(), "-=", ToExpr(context.expression()));
 
     public override AstNode VisitMultAssignment(PythonParser.MultAssignmentContext context)
-        => new AssignStmt(context.ID().GetText(), "*=", ToExpr(context.expression()));
+        => Assign(context.ID().GetText(), "*=", ToExpr(context.expression()));
 
     public override AstNode VisitDivAssignment(PythonParser.DivAssignmentContext context)
-        => new AssignStmt(context.ID().GetText(), "/=", ToExpr(context.expression()));
+        => Assign(context.ID().GetText(), "/=", ToExpr(context.expression()));
 
+    // x: int = 5  /  x: int — тип теперь сохраняется (раньше терялся и получалось "auto x;")
     public override AstNode VisitTypeDeclaration(PythonParser.TypeDeclarationContext context)
     {
         string name = context.ID().GetText();
         var initExpr = context.expression() != null ? ToExpr(context.expression()) : null;
-        return new VarDeclStmt(false, name, initExpr);
+        Declare(name);
+        return new VarDeclStmt(false, name, initExpr, ParseType(context.type().GetText()));
     }
 
-    // --- Управляющие конструкции ---
+    // ---------- управляющие конструкции ----------
+
     public override AstNode VisitIfStatement(PythonParser.IfStatementContext context)
     {
         var exprs = context.expression();
@@ -124,14 +213,11 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
             if (index >= exprs.Length)
             {
                 // Если кончились условия, значит остался блок else (если он есть)
-                // Блоки elif/if занимают индексы 0..exprs.Length-1, а else идет последним
                 return blocks.Length > index ? ToStmt(blocks[index]) : null;
             }
 
             var condition = ToExpr(exprs[index]);
             var thenBranch = ToStmt(blocks[index]);
-            
-            // Следующая ветка — это либо следующий elif, либо финальный else
             var elseBranch = BuildIfChain(index + 1);
 
             return new IfStmt(condition, thenBranch, elseBranch);
@@ -145,56 +231,86 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
         return new WhileStmt(ToExpr(context.expression()), ToStmt(context.block()));
     }
 
+    // range(n) / range(a, b) / range(a, b, step) / for x in <выражение>
     public override AstNode VisitForStatement(PythonParser.ForStatementContext context)
     {
         string varName = context.ID().GetText();
-        
-        // Пытаемся понять, что за выражение идет после "in"
         var exprCtx = context.expression();
-        Expr startExpr = new LiteralExpr(LiteralKind.Int, "0");
-        Expr endExpr = ToExpr(exprCtx); // по умолчанию пока так
 
-        // Проверяем, не вызов ли это range(...)
-        // В сгенерированном парсере вызов функции попадает под FunctionCallContext
-        if (exprCtx is PythonParser.FunctionCallContext callCtx)
+        PushScope();
+        Declare(varName);
+        try
         {
-            string funcName = callCtx.expression(0)?.GetText() ?? "";
-            if (funcName.Contains("range"))
+            if (exprCtx is PythonParser.FunctionCallContext callCtx
+                && callCtx.expression(0) is PythonParser.IdentifierContext callee
+                && callee.ID().GetText() == "range")
             {
-                // Если аргументов у range() больше одного, можно разобрать их отдельно
-                var args = callCtx.expression();
-                if (args.Length == 2) // range(stop) -> args[0] это сам range, args[1] это stop
+                // expression(0) — сам range, дальше его аргументы
+                var args = callCtx.expression().Skip(1).Select(ToExpr).ToList();
+                Stmt body = ToStmt(context.block());
+
+                // В IR конец ForRange включительный, а в Python range конец исключает: end - 1
+                if (args.Count == 1) return new ForRangeStmt(varName, Zero, MinusOne(args[0]), body);
+                if (args.Count == 2) return new ForRangeStmt(varName, args[0], MinusOne(args[1]), body);
+
+                if (args.Count == 3)
                 {
-                    endExpr = ToExpr(args[1]);
-                }
-                else if (args.Length >= 3) // range(start, stop)
-                {
-                    startExpr = ToExpr(args[1]);
-                    endExpr = ToExpr(args[2]);
+                    // range(a, b, step): шаг больше не теряется
+                    Expr step = args[2];
+                    bool negative = step is UnaryExpr { Op: "-" };
+
+                    var init = new VarDeclStmt(false, varName, args[0], new TypeRef(DataType.Int, "int"));
+                    var condition = new BinaryExpr(negative ? ">" : "<", new IdentifierExpr(varName), args[1]);
+                    return new ForStmt(init, condition, new AssignStmt(varName, "+=", step), body);
                 }
             }
-        }
 
-        return new ForRangeStmt(varName, startExpr, endExpr, ToStmt(context.block()));
+            // for x in строка_или_коллекция — обход элементов (раньше выражение считалось верхней границей)
+            return new ForEachStmt(varName, null, ToExpr(exprCtx), ToStmt(context.block()));
+        }
+        finally
+        {
+            PopScope();
+        }
+    }
+
+    private static Expr MinusOne(Expr end)
+    {
+        if (end is LiteralExpr { Kind: LiteralKind.Int } literal && int.TryParse(literal.Text, out int n))
+            return new LiteralExpr(LiteralKind.Int, (n - 1).ToString());
+
+        Expr left = end is IdentifierExpr or LiteralExpr ? end : new ParenExpr(end);
+        return new BinaryExpr("-", left, One);
     }
 
     public override AstNode VisitFunctionDef(PythonParser.FunctionDefContext context)
     {
         string name = context.ID().GetText();
-        var parameters = new List<Parameter>();
 
+        // У функции своя рамка: внешние локальные переменные ей не принадлежат
+        int savedFrame = _frameStart;
+        _frameStart = _scopes.Count;
+        PushScope();
+
+        var parameters = new List<Parameter>();
         if (context.parameterList() != null)
         {
             foreach (var p in context.parameterList().parameter())
             {
                 string pName = p.ID().GetText();
                 string pType = p.type() != null ? p.type().GetText() : "int";
-                parameters.Add(new Parameter(pName, ParseType(pType)));
+
+                // значение по умолчанию (def f(x=1)) теперь сохраняется
+                parameters.Add(new Parameter(pName, ParseType(pType), ToExpr(p.expression())));
+                Declare(pName);
             }
         }
 
         TypeRef returnType = context.type() != null ? ParseType(context.type().GetText()) : TypeRef.Void;
         var body = ToStmt(context.block()) as BlockStmt ?? new BlockStmt(new List<Stmt>());
+
+        PopScope();
+        _frameStart = savedFrame;
 
         // Передаем IsExpressionBody = false, так как функции в Python имеют блок с телом
         return new FunctionDecl(name, parameters, returnType, body, IsExpressionBody: false);
@@ -202,16 +318,15 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
 
     public override AstNode VisitBlock(PythonParser.BlockContext context)
     {
-        if (context.statements() != null)
-        {
-            return new BlockStmt(BuildStatements(context.statements()));
-        }
-        else if (context.simpleStatement() != null)
-        {
-            var stmt = ToStmt(context.simpleStatement());
-            return new BlockStmt(stmt != null ? new List<Stmt> { stmt } : new List<Stmt>());
-        }
-        return new BlockStmt(new List<Stmt>());
+        PushScope();
+        var statements = context.statements() != null
+            ? BuildStatements(context.statements())
+            : context.simpleStatement() != null
+                ? SmallStatements(context.simpleStatement())
+                : new List<Stmt>();
+        PopScope();
+
+        return new BlockStmt(statements);
     }
 
     public override AstNode VisitJumpStatement(PythonParser.JumpStatementContext context)
@@ -235,22 +350,66 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
             catches.Add(new CatchClause(exParam, exType, ToStmt(cb.block()) as BlockStmt));
         }
 
-        BlockStmt finallyBlock = context.finallyBlock() != null 
-            ? ToStmt(context.finallyBlock().block()) as BlockStmt 
+        BlockStmt finallyBlock = context.finallyBlock() != null
+            ? ToStmt(context.finallyBlock().block()) as BlockStmt
             : null;
 
         return new TryStmt(body, catches, finallyBlock);
     }
 
-    // --- Выражения ---
-    public override AstNode VisitParens(PythonParser.ParensContext context)
-        => new ParenExpr(ToExpr(context.expression()));
+    // ---------- вызовы и обращения к членам (раньше передавались сырым текстом) ----------
 
     public override AstNode VisitFunctionCall(PythonParser.FunctionCallContext context)
-        => new RawExpr(AntlrText.Raw(context));
+    {
+        var all = context.expression();
+        var args = all.Skip(1).Select(ToExpr).ToList();
+
+        if (all[0] is PythonParser.MemberAccessContext member)
+            return new CallExpr(ToExpr(member.expression()), member.ID().GetText(), args);
+
+        if (all[0] is PythonParser.IdentifierContext id)
+            return BuildFreeCall(id.ID().GetText(), args);
+
+        return new RawExpr(AntlrText.Raw(context));
+    }
+
+    // Имена встроенных функций Python -> имена, которые знает C++ backend.
+    // Остальные вызовы (свои функции, abs, min, max, round ...) идут как есть.
+    private static Expr BuildFreeCall(string name, List<Expr> args)
+    {
+        switch (name)
+        {
+            case "print": return BuildPrint(args);
+            case "input": return new CallExpr(null, "readLine", new List<Expr>());
+            case "len" when args.Count == 1: return new MemberExpr(args[0], "size");
+            case "str" when args.Count == 1: return new CallExpr(args[0], "toString", new List<Expr>());
+            case "int" when args.Count == 1: return new CallExpr(args[0], "toInt", new List<Expr>());
+            case "float" when args.Count == 1: return new CallExpr(args[0], "toDouble", new List<Expr>());
+        }
+        return new CallExpr(null, name, args);
+    }
+
+    // print(a, b, c) печатает аргументы через пробел
+    private static Expr BuildPrint(List<Expr> args)
+    {
+        if (args.Count <= 1) return new CallExpr(null, "println", args);
+
+        var parts = new List<Expr>();
+        for (int i = 0; i < args.Count; i++)
+        {
+            if (i > 0) parts.Add(new LiteralExpr(LiteralKind.String, "\" \""));
+            parts.Add(args[i]);
+        }
+        return new CallExpr(null, "println", new List<Expr> { new TemplateExpr(parts) });
+    }
 
     public override AstNode VisitMemberAccess(PythonParser.MemberAccessContext context)
-        => new RawExpr(AntlrText.Raw(context));
+        => new MemberExpr(ToExpr(context.expression()), context.ID().GetText());
+
+    // ---------- выражения ----------
+
+    public override AstNode VisitParens(PythonParser.ParensContext context)
+        => new ParenExpr(ToExpr(context.expression()));
 
     public override AstNode VisitUnaryMinus(PythonParser.UnaryMinusContext context)
         => new UnaryExpr("-", ToExpr(context.expression()));
@@ -259,7 +418,12 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
         => new UnaryExpr("!", ToExpr(context.expression()));
 
     public override AstNode VisitMulDiv(PythonParser.MulDivContext context)
-        => new BinaryExpr(context.GetChild(1).GetText(), ToExpr(context.expression(0)), ToExpr(context.expression(1)));
+    {
+        string op = context.GetChild(1).GetText();
+        // // в C++ — комментарий; целочисленное деление там записывается как /
+        if (op == "//") op = "/";
+        return new BinaryExpr(op, ToExpr(context.expression(0)), ToExpr(context.expression(1)));
+    }
 
     public override AstNode VisitAddSub(PythonParser.AddSubContext context)
         => new BinaryExpr(context.GetChild(1).GetText(), ToExpr(context.expression(0)), ToExpr(context.expression(1)));
@@ -283,7 +447,7 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
         => new LiteralExpr(LiteralKind.Double, context.FLOAT().GetText());
 
     public override AstNode VisitStringLiteral(PythonParser.StringLiteralContext context)
-        => new LiteralExpr(LiteralKind.String, context.STRING().GetText());
+        => new LiteralExpr(LiteralKind.String, NormalizeString(context.STRING().GetText()));
 
     public override AstNode VisitTrueLiteral(PythonParser.TrueLiteralContext context)
         => new LiteralExpr(LiteralKind.Int, "true");
@@ -296,4 +460,26 @@ public class PythonAstBuilder : PythonParserBaseVisitor<AstNode>
 
     public override AstNode VisitUnparsedStatement(PythonParser.UnparsedStatementContext context)
         => new UnsupportedStmt("Unparsed python statement", AntlrText.Raw(context));
+
+    // 'abc' -> "abc": в C++ одинарные кавычки — это символ, а не строка
+    private static string NormalizeString(string token)
+    {
+        string inner = token.Substring(1, token.Length - 2);
+        var sb = new StringBuilder("\"");
+
+        for (int i = 0; i < inner.Length; i++)
+        {
+            char c = inner[i];
+            if (c == '\\' && i + 1 < inner.Length)
+            {
+                if (inner[i + 1] == '\'') sb.Append('\'');     // \' внутри двойных кавычек не нужен
+                else sb.Append(c).Append(inner[i + 1]);
+                i++;
+            }
+            else if (c == '"') sb.Append("\\\"");              // " внутри 'строки' надо экранировать
+            else sb.Append(c);
+        }
+
+        return sb.Append('"').ToString();
+    }
 }
