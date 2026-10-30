@@ -12,6 +12,10 @@ public abstract class PythonLexerBase : Lexer
     private int _openedBrackets = 0;
     private IToken? _lastToken = null;
 
+    // Позиция последнего символа последнего настоящего токена. Нужна, чтобы у искусственных
+    // INDENT/DEDENT были осмысленные границы в исходном тексте (иначе дерево разбора показывает мусор).
+    private int _lastRealStop = -1;
+
     protected PythonLexerBase(ICharStream input) : base(input)
     {
         Init();
@@ -29,6 +33,7 @@ public abstract class PythonLexerBase : Lexer
         _pendingTokens.Clear();
         _openedBrackets = 0;
         _lastToken = null;
+        _lastRealStop = -1;
     }
 
     public override void Reset()
@@ -47,6 +52,7 @@ public abstract class PythonLexerBase : Lexer
         }
 
         var next = base.NextToken();
+        if (next.Type != Eof) _lastRealStop = next.StopIndex;
 
         // Отслеживаем открытые скобки () [] {}, внутри которых переводы строк игнорируются
         if (next.Text == "(" || next.Text == "[" || next.Text == "{")
@@ -162,6 +168,7 @@ public abstract class PythonLexerBase : Lexer
         var token = new CommonToken(PythonLexer.INDENT, "<INDENT>");
         token.Line = Line;
         token.Column = Column;
+        SetEmptySpan(token);
         return token;
     }
 
@@ -170,6 +177,15 @@ public abstract class PythonLexerBase : Lexer
         var token = new CommonToken(PythonLexer.DEDENT, "<DEDENT>");
         token.Line = Line;
         token.Column = Column;
+        SetEmptySpan(token);
         return token;
+    }
+
+    // Пустой отрезок сразу после последнего настоящего токена (Stop = Start - 1, как у пустых токенов в ANTLR).
+    // Тогда правило, которое заканчивается на DEDENT, охватывает текст ровно до последнего настоящего токена.
+    private void SetEmptySpan(CommonToken token)
+    {
+        token.StartIndex = _lastRealStop + 1;
+        token.StopIndex = _lastRealStop;
     }
 }
